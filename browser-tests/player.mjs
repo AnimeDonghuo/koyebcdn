@@ -5,7 +5,7 @@ import {createApp} from '../server.js';
 import {createMemoryStore} from '../store.js';
 import {DEFAULT_SITE_ORIGIN} from '../playback-auth.js';
 
-const security={PLAYBACK_SIGNING_SECRET:'browser-test-signing-secret-'.repeat(2),PLAYBACK_ISSUER_KEY:'browser-test-issuer-key-'.repeat(2),TELEGRAM_CHANNEL_ID:'-1002617067511'};
+const security={PLAYBACK_AUTH_MODE:'signed',PLAYBACK_SIGNING_SECRET:'browser-test-signing-secret-'.repeat(2),PLAYBACK_ISSUER_KEY:'browser-test-issuer-key-'.repeat(2),TELEGRAM_CHANNEL_ID:'-1002617067511'};
 const server=createApp(security, {store:createMemoryStore()});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 let browser;

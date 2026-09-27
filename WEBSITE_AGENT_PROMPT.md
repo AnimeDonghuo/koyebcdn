@@ -1,3 +1,5 @@
+> **Legacy signed mode only.** Default playback now uses basic site-URL checks and a plain iframe. No website token endpoint or keys are needed. Follow this prompt only when intentionally enabling `PLAYBACK_AUTH_MODE=signed`; otherwise preserve the existing iframe and allow origin referrers.
+
 # Copy this prompt into the agent session for your WEBSITE
 
 Work in the repository for my website, whose production origin is:

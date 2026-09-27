@@ -6,7 +6,7 @@ import {createApp} from '../server.js';
 import {createMemoryStore} from '../store.js';
 const a='-1002617067511',b='-1001234567890';
 const url=id=>`https://t.me/c/${id.slice(4)}/7`;
-const env={TELEGRAM_CHANNEL_IDS:`${a}, ${b}`,TELEGRAM_CHANNEL_ID:'-100999',TELEGRAM_WEBHOOK_SECRET:'webhook',PLAYBACK_SIGNING_SECRET:'s'.repeat(48),PLAYBACK_ISSUER_KEY:'k'.repeat(48)};
+const env={PLAYBACK_AUTH_MODE:'signed',TELEGRAM_CHANNEL_IDS:`${a}, ${b}`,TELEGRAM_CHANNEL_ID:'-100999',TELEGRAM_WEBHOOK_SECRET:'webhook',PLAYBACK_SIGNING_SECRET:'s'.repeat(48),PLAYBACK_ISSUER_KEY:'k'.repeat(48)};
 
 test('multiple DB channel config trims/deduplicates IDs, supports legacy, and rejects wildcards',()=>{
   assert.deepEqual([...parseChannelIds(` ${a}, ${b}\n${a}, `)],[a,b]);

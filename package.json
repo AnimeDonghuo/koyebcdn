@@ -10,7 +10,8 @@
     "start": "node server.js",
     "test": "node --test",
     "test:browser": "node browser-tests/player.mjs",
-    "test:media": "node browser-tests/media.mjs"
+    "test:media": "node browser-tests/media.mjs",
+    "test:site": "node browser-tests/site.mjs"
   },
   "dependencies": {
     "big-integer": "^1.6.52",

@@ -1,3 +1,23 @@
+# Default: basic site-URL checks (no token integration)
+
+Use `PLAYBACK_AUTH_MODE=site` (the default when unset) and:
+
+```env
+ALLOWED_SITE_ORIGIN=https://youngest-corabella-platinum0-23c07cdf.koyeb.app
+```
+
+Existing plain iframes work. No `PLAYBACK_ISSUER_KEY`, `PLAYBACK_SIGNING_SECRET`, `/api/playback-token`, handshake, or session cookie is required. Old keys may remain; they are ignored in this mode. Redeploy the player after updating, then reload the watch page. Preserve the origin in iframe referrers (the browser default `strict-origin-when-cross-origin` is fine).
+
+CSP allows framing only by the exact configured origin. On Play, the player checks ancestor origins (or `document.referrer` when unavailable). Metadata and media check that requests refer to the player itself and reject browser cross-site requests/navigation. They do not contact the website backend. No video/Telegram/Mongo lookup occurs before Play.
+
+**Limit:** this is deliberately only basic hotlink deterrence. Headers can be forged by scripts/downloaders; these checks do not authenticate viewers or prevent downloading/recording. Telegram channel restrictions, bounded streaming, bot credentials, admin API authentication and webhook secrets are unchanged.
+
+## Optional legacy signed mode
+
+The instructions below apply **only** if you explicitly set `PLAYBACK_AUTH_MODE=signed`. Do not install this integration to fix site-mode playback. Signed mode is more restrictive and requires coordinated website/backend setup before deployment.
+
+---
+
 # Restrict playback to your website
 
 Allowed website:

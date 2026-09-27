@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createPlaybackAuth,DEFAULT_SITE_ORIGIN,resourceForTarget} from '../playback-auth.js';
 import {createApp} from '../server.js';
 import {createMemoryStore} from '../store.js';
-const env={PLAYBACK_SIGNING_SECRET:'s'.repeat(48),PLAYBACK_ISSUER_KEY:'k'.repeat(48),TELEGRAM_CHANNEL_ID:'-1002617067511'};
+const env={PLAYBACK_AUTH_MODE:'signed',PLAYBACK_SIGNING_SECRET:'s'.repeat(48),PLAYBACK_ISSUER_KEY:'k'.repeat(48),TELEGRAM_CHANNEL_ID:'-1002617067511'};
 const target={url:'https://t.me/c/2617067511/22047'};
 function session(auth,grant,resource=grant.resource){
   let cookie;const result=auth.open({headers:{authorization:`Bearer ${grant.token}`,'sec-fetch-site':'same-origin'}},{setHeader(k,v){if(k==='Set-Cookie')cookie=v;}},resource);

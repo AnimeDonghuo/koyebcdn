@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createSitePlaybackAuth} from './site-playback-auth.js';
 import {createPlaybackAuth,telegramResource,catalogResource} from './playback-auth.js';
 import {createMTProto} from './mtproto.js';
 import {parseTelegramLink,isTelegramPlayerPath,configuredTelegramChannels} from './telegram-link.js';
@@ -13,7 +14,9 @@ import {validateVideo,telegramVideo,publicVideo,MAX_TELEGRAM_BYTES} from './cata
 const root=dirname(fileURLToPath(import.meta.url));
 export function createApp(env=process.env, dependencies={}) {
   const channels=configuredTelegramChannels(env);
-  const playback=dependencies.playback??createPlaybackAuth(env);
+  const playbackMode=env.PLAYBACK_AUTH_MODE||'site';
+  if(!['site','signed'].includes(playbackMode))throw new Error('PLAYBACK_AUTH_MODE must be site or signed');
+  const playback=dependencies.playback??(playbackMode==='signed'?createPlaybackAuth(env):createSitePlaybackAuth(env));
   const mtproto=dependencies.mtproto??createMTProto(env);
   const expose=v=>{
     const result=publicVideo(v,mtproto.enabled);
@@ -70,7 +73,7 @@ export function createApp(env=process.env, dependencies={}) {
     const j=await r.json();if(!r.ok||!j.ok) throw Object.assign(new Error('Telegram file unavailable'),{status:502});return j.result;
   }
   const server=http.createServer(async(req,res)=>{
-    res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
+    res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy',playbackMode==='signed'?'no-referrer':'strict-origin-when-cross-origin');
     res.setHeader('Content-Security-Policy',`frame-ancestors ${playback.allowedSite}; base-uri 'none'; object-src 'none'`);
     if(req.method==='OPTIONS'){res.writeHead(204,{'Allow':'GET, HEAD, POST, OPTIONS'});return res.end();}
     try {
@@ -79,12 +82,13 @@ export function createApp(env=process.env, dependencies={}) {
         // Public service status only, not a player entry point. This remains
         // embeddable for deployment previews; every actual player is restricted.
         res.setHeader('Content-Security-Policy',"base-uri 'none'; object-src 'none'");
-        return send(res,200,{service:'Protected Telegram player',allowedSite:playback.allowedSite,message:'Open videos through the authorized site. Plain links do not grant playback access.'});
+        return send(res,200,{service:'Telegram player',playbackMode,allowedSite:playback.allowedSite,message:'Open videos through the authorized site. Plain links do not grant playback access.'});
       }
       if(path==='/player-config.js'&&req.method==='GET'){
         res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store'});
-        return res.end(`export const allowedSite=${JSON.stringify(playback.allowedSite)};`);
+        return res.end(`export const allowedSite=${JSON.stringify(playback.allowedSite)};export const playbackMode=${JSON.stringify(playbackMode)};`);
       }
+      if(playbackMode==='site'&&['/api/playback/grant','/api/playback/session'].includes(path))return send(res,410,{error:'Site URL mode does not use playback tokens or sessions.'});
       if(path==='/api/playback/grant'&&req.method==='POST')return send(res,200,playback.issue(req,await body(req)));
       if(path==='/api/playback/session'&&req.method==='POST'){
         const input=await body(req);

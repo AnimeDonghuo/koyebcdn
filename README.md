@@ -2,7 +2,7 @@
 
 Player-only iframe based on the supplied mobile/landscape screenshots: title/avatar at top left, settings at top right, large center play/pause and next/skip control, white timeline with elapsed/total times, video list, mute, subtitles, audio-language selection where supported, and fullscreen. No ads, surrounding site navigation, or server-selection cards are included. This is an independent implementation, not Dailymotion's proprietary player or CDN.
 
-> **Protected playback is now required.** Only `https://youngest-corabella-platinum0-23c07cdf.koyeb.app` may embed the player by default. A plain iframe or copied media URL no longer grants playback. Configure both secrets **and integrate your website's backend** before deploying this update. See [SECURITY_SETUP.md](SECURITY_SETUP.md).
+> **Site-URL checks are now the default.** Existing plain iframes on `https://youngest-corabella-platinum0-23c07cdf.koyeb.app` work without playback keys, cookies, or a website token endpoint. This is basic hotlink deterrence, NOT authentication; technical users can bypass it. See [SECURITY_SETUP.md](SECURITY_SETUP.md).
 
 ## Deploy and configure
 
@@ -18,8 +18,7 @@ MONGODB_DATABASE=watch_player
 PORT=8000
 MAX_STREAMS=2
 ALLOWED_SITE_ORIGIN=https://youngest-corabella-platinum0-23c07cdf.koyeb.app
-PLAYBACK_SIGNING_SECRET=generate_one_random_secret
-PLAYBACK_ISSUER_KEY=generate_a_different_random_secret
+PLAYBACK_AUTH_MODE=site
 PLAYBACK_SESSION_TTL_SECONDS=600
 ```
 
@@ -49,15 +48,15 @@ Use this URL for your example post:
 https://YOUR-KOYEB-URL/https://t.me/c/2617067511/22047
 ```
 
-The URL identifies the video; it is not an access credential. Use the protected `embed.js` integration below rather than opening this URL directly. It displays the player immediately; **nothing is fetched from the catalog or Telegram until the user presses Play**. On Play, the service resolves that post, stores/caches its metadata in MongoDB, and streams its video. You do not need captions, webhooks, episode IDs or prior imports. Existing posts work when Telegram allows your bot to retrieve them.
+Use this URL in an iframe on your allowed website, or use the optional `embed.js` helper below. Direct top-level playback is blocked by the player. It displays the player immediately; **nothing is fetched from the catalog or Telegram until the user presses Play**. On Play, the service resolves that post, stores/caches its metadata in MongoDB, and streams its video. You do not need captions, webhooks, episode IDs or prior imports. Existing posts work when Telegram allows your bot to retrieve them.
 
 ```html
 <script defer src="https://YOUR-KOYEB-URL/embed.js"
-  data-token-endpoint="/api/playback-token"></script>
+ ></script>
 <div data-telegram-url="https://t.me/c/2617067511/22047"></div>
 ```
 
-`/api/playback-token` must be implemented on your **authorized website's backend**, not as static frontend JavaScript. The helper in `examples/site-playback-backend.js` requires your real session/per-video authorization callback. It is not automatically installed on your other Koyeb service.
+In default `site` mode, no website backend changes or `/api/playback-token` endpoint are needed. Existing keys can remain configured; they are ignored. The legacy signed integration is optional and only used when you explicitly set `PLAYBACK_AUTH_MODE=signed`.
 
 For proxies that normalize double slashes in a path, use:
 
@@ -65,7 +64,7 @@ For proxies that normalize double slashes in a path, use:
 https://YOUR-KOYEB-URL/watch?url=https%3A%2F%2Ft.me%2Fc%2F2617067511%2F22047
 ```
 
-These return HTML, not `<video src>` data. The protected embed script creates the iframe and handles the authorization handshake. Raw media `/telegram/media/2617067511/22047` and metadata `GET /api/telegram?url=<encoded-post-link>` both require the signed playback-session cookie. They are not standalone public URLs anymore.
+These return HTML, not `<video src>` data. A plain iframe works; `embed.js` can also create it. Raw media and metadata use basic same-player Referrer/Fetch Metadata checks, not tokens. CSP restricts framing to the allowed website, and the player checks its parent origin before loading video. These checks can be forged outside a browser.
 
 Only canonical `https://t.me/c/CHANNEL/POST` links belonging to the `TELEGRAM_CHANNEL_IDS` allowlist are accepted. The linked post plays its exact file: choose the low-quality upload to start with low quality. A lone link cannot identify unrelated uploads as alternate resolutions. Public channel usernames, topic/album links, and arbitrary remote URLs are not supported.
 
@@ -74,7 +73,7 @@ Only canonical `https://t.me/c/CHANNEL/POST` links belonging to the `TELEGRAM_CH
 After installing the website backend integration, add the script once; existing and dynamically inserted placeholders become players:
 
 ```html
-<script defer src="https://YOUR-KOYEB-URL/embed.js" data-token-endpoint="/api/playback-token"></script>
+<script defer src="https://YOUR-KOYEB-URL/embed.js"></script>
 <div
   data-telegram-url="https://t.me/c/2617067511/22047"
   data-title="Episode 160 · English + Indonesian"
@@ -164,9 +163,9 @@ A JSON manifest can also be posted as a plain channel text post. Invalid manifes
 
 ## Security and tests
 
-Playback metadata and Koyeb media routes now require expiring signed sessions; the player uses exact-origin `frame-ancestors` and `postMessage` checks. The website must authenticate/authorize viewers before requesting grants. No bypass is provided when secrets or the integration are missing. Catalog admin imports and Telegram webhook authentication remain separate. Only publish media you can distribute, and add rate limiting to the website's grant route.
+Default `PLAYBACK_AUTH_MODE=site` uses exact-site CSP and parent-origin checks plus basic Referrer/Fetch Metadata checks on metadata and media. No signed grants, cookies, website token route, or playback keys are required. Plain iframes work. If the browser lacks `ancestorOrigins`, it must receive the website origin through `document.referrer`; avoid `referrerpolicy="no-referrer"` on the embed.
 
-This is anti-hotlink protection, not DRM. Authorized viewers can still record/download, and copied bearer grants/cookies can be replayed outside a browser until expiry. A public guest-enabled website necessarily allows visitors to obtain access through that site. Direct external MP4/subtitle URLs retain their provider's access policy; protect those at the provider too. The service root is now a public JSON status response for deployment previews, not a player. See [SECURITY_SETUP.md](SECURITY_SETUP.md) for compatibility and security limits.
+This is NOT authentication or DRM: non-browser clients can forge headers and download videos. Admin imports, Telegram webhook secrets and DB-channel restrictions remain enforced. Only publish media you can distribute. Optional `PLAYBACK_AUTH_MODE=signed` restores the previous stricter flow, requiring website backend integration; see [SECURITY_SETUP.md](SECURITY_SETUP.md).
 
 ```sh
 npm ci
@@ -187,13 +186,13 @@ npm run test:browser
 BROWSER_EXECUTABLE_PATH=/path/to/chromium npm run test:browser
 ```
 
-The browser suite checks signed-grant/session setup, renewal without media reload, direct-link denial, wrong-site iframe blocking, and **zero video/API requests before Play**, lowest-quality selection, play/pause, quality switching, mute, speed, seeking, double-click/double-tap gestures, local subtitle files, simulated browser-exposed tracks, and stable icon sizes across a simulated denied-orientation-lock fallback. Actual mobile OS fullscreen behavior and real streaming still need device/service testing. Screenshots can optionally be written to an existing directory using `SCREENSHOT_DIR`; do not commit test artifacts.
+The legacy signed-mode browser suite checks signed-grant/session setup, renewal without media reload, direct-link denial, wrong-site iframe blocking, and **zero video/API requests before Play**, lowest-quality selection, play/pause, quality switching, mute, speed, seeking, double-click/double-tap gestures, local subtitle files, simulated browser-exposed tracks, and stable icon sizes across a simulated denied-orientation-lock fallback. Actual mobile OS fullscreen behavior and real streaming still need device/service testing. Screenshots can optionally be written to an existing directory using `SCREENSHOT_DIR`; do not commit test artifacts.
 
 A real MongoDB integration test is opt-in: set `TEST_MONGODB_URI` before `npm test`. It uses and drops a new randomly named `watch_test_...` database (never the configured production database). Without that variable, the integration test is skipped and MongoDB adapter tests use a mock client. Font files in `public/fonts` are self-hosted Roboto, with their included license.
 
-The browser test transport intercepts HTTPS responses and cannot fully model CHIPS partition keys or provider-specific cookie policies. Unit tests verify the `Partitioned`, `Secure`, `HttpOnly`, and `SameSite=None` attributes; verify cookie compatibility on real target browsers before production. A mocked site-session test covers the website helper, but your site's actual session integration remains required.
+The browser test transport intercepts HTTPS responses and cannot fully model CHIPS partition keys or provider-specific cookie policies. Unit tests verify the `Partitioned`, `Secure`, `HttpOnly`, and `SameSite=None` attributes; verify cookie compatibility on real target browsers before production. A mocked site-session test covers the website helper, but your site's actual session integration is required only in optional signed mode.
 
-For the agent working on your separate website repository, use the self-contained integration prompt in [WEBSITE_AGENT_PROMPT.md](WEBSITE_AGENT_PROMPT.md). The instructions include backend discovery, protected embedding, multiple-channel links and secret handling.
+Only if opting into signed mode, the agent working on your separate website repository can use the integration prompt in [WEBSITE_AGENT_PROMPT.md](WEBSITE_AGENT_PROMPT.md). The instructions include backend discovery, protected embedding, multiple-channel links and secret handling.
 
 ### Real-media regression tests (development only)
 
@@ -208,3 +207,7 @@ FFMPEG_BIN=/path/to/ffmpeg BROWSER_EXECUTABLE_PATH=/path/to/chromium npm run tes
 This generates an 8-second H.264/AAC MP4 with two language-tagged audio streams (440 Hz English / 880 Hz Hindi) under ignored `.cache/media-fixtures`. It uses actual browser media playback—not mocked HTMLMediaElement methods—to verify subtitle active cues, English/Hindi selection, source reload persistence, Off, HTTP failure/retry, cancellation, UTF-16 local subtitles, and audio switching. The test measures decoded audio frequency to confirm the audio really changed, not just the dropdown.
 
 Chromium's experimental `AudioVideoTracks` flag is enabled **only in the supported-API test**. A separate ordinary Chromium run verifies the unsupported/default-audio message. The production player cannot enable browser experimental flags and does not claim universal multi-audio support. FFmpeg and generated media are test tools only; they are neither installed nor executed in the production Docker image. The main protected-player browser suite still tests authorization and controls separately. Static module/worker URLs are versioned together at startup to prevent mixing cached old scripts after deployment.
+
+### Default site-URL playback regression
+
+Run `npm run test:site` with the same browser/FFmpeg setup as `test:media`. It plays a real generated MP4 through the full player in a **plain iframe**, with no website script, keys, token endpoint or cookies. It verifies zero metadata/media requests before Play, successful playback afterward, direct-opening denial and wrong-site CSP blocking. The virtual HTTPS transport tests the application, not a deployed Koyeb service or live Telegram file.

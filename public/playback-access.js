@@ -1,6 +1,21 @@
-import {allowedSite} from '/player-config.js';
+import {allowedSite,playbackMode} from '/player-config.js';
 
 export function createPlaybackAccess(target,onExpired){
+  // Default mode works in the existing plain iframe. No parent listener,
+  // backend token route, signing keys, or third-party cookies are required.
+  if(playbackMode==='site')return {
+    async ensure(){
+      if(window.parent===window)throw new Error(`Open this player inside ${allowedSite}. Direct-link playback is disabled.`);
+      const ancestors=window.location.ancestorOrigins;
+      if(ancestors?.length){
+        if(Array.from(ancestors).every(origin=>origin===allowedSite))return;
+      }else{
+        try{if(new URL(document.referrer).origin===allowedSite)return;}catch{}
+      }
+      throw new Error(`This player is only available on ${allowedSite}. The embed must allow the website origin in its referrer.`);
+    },
+    setActive(){},
+  };
   let expiresAt=0,pending=null,active=false,timer;
   async function requestGrant(){
     if(window.parent===window)throw new Error(`Open this player inside ${allowedSite}. Direct-link playback is disabled.`);
