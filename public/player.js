@@ -1,3 +1,4 @@
+import {setupMediaHealth} from './media-health.js';
 import {createPlaybackAccess} from './playback-access.js';
 import {setupAudio} from './audio-controller.js';
 import {setupSubtitles} from './subtitle-controller.js';
@@ -24,7 +25,7 @@ if(/^https:\/\/t\.me\/c\/[1-9]\d*\/[1-9]\d*$/.test(params.get('next')||'')){
   nextURL=new URL('/watch',location.origin);nextURL.searchParams.set('url',params.get('next'));
   $('next').setAttribute('aria-label','Next video');$('next').title='Next video';$('next-video').hidden=false;
 }
-function notice(text,retry=false){$('notice').hidden=!text;$('status').textContent=text;$('retry').hidden=!retry;}
+function notice(text,retry=false){if(!text)$('try-quality').hidden=true;$('notice').hidden=!text;$('status').textContent=text;$('retry').hidden=!retry;}
 const playbackAccess=createPlaybackAccess(postUrl?{url:postUrl}:{id},error=>{video.pause();notice(error.message,true);});
 function busy(value){player.classList.toggle('busy',value);$('loading').hidden=!value;}
 function panelsOpen(){return !$('settings-panel').hidden||!$('playlist-panel').hidden;}
@@ -40,7 +41,9 @@ const subtitleController=setupSubtitles(video,{
   removeButton:$('remove-subtitles'),retryButton:$('retry-subtitles'),status:$('subtitle-status'),
 });
 const audioController=setupAudio(video,{select:$('audio-language'),status:$('audio-status')});
+const mediaHealth=setupMediaHealth(video,{onFailure(message){busy(false);closePanels();notice(message,true);$('try-quality').hidden=sources.length<2;if(sources.length>1)$('try-quality').textContent=`Try ${sources[(selected+1)%sources.length].height}p`;}});
 function choose(index,position=0){
+  mediaHealth.reset();
   const token=++generation,rate=Number($('speed').value);selected=index;
   subtitleController.sourceChanging();
   audioController.sourceChanging();
@@ -72,9 +75,14 @@ async function play(){
   try{
     // The only bootstrap entry point: zero metadata/Telegram/media requests on page load.
     await playbackAccess.ensure();
+    if(loaded&&mediaHealth.failed)choose(selected,video.currentTime||0);
     await load();
     await video.play();
-  }catch(e){notice(e.name==='NotAllowedError'?'Press Play again to start playback with sound.':e.message||'Unable to play this video.',true);}
+  }catch(e){
+    if(e.name==='AbortError')return;
+    if(e.name==='NotSupportedError'||video.error)await mediaHealth.report(e);
+    else notice(e.name==='NotAllowedError'?'Press Play again to start playback with sound.':e.message||'Unable to play this video.',true);
+  }
   finally{starting=false;busy(false);wake();}
 }
 function toggle(){if(video.paused)play();else video.pause();}
@@ -124,13 +132,13 @@ $('next').onclick=()=>{if(nextURL){location.href=nextURL.href;return;}seekBy(10)
 $('next-video').onclick=()=>{if(nextURL)location.href=nextURL.href;};
 $('current-video').onclick=()=>{closePanels();play();};
 $('retry').onclick=()=>{notice('');if(loaded)choose(selected,video.currentTime||0);play();};
+$('try-quality').onclick=()=>{const index=(selected+1)%sources.length;notice('');$('quality').value=String(index);choose(index,video.currentTime||0);play();};
 $('quality').onchange=()=>{const resume=!video.paused,position=video.currentTime||0;choose(Number($('quality').value),position);if(resume)play();};
 $('speed').onchange=()=>video.playbackRate=Number($('speed').value);
 video.addEventListener('play',()=>{playbackAccess.setActive(true);$('play-icon').setAttribute('d','M9 5h8v30H9ZM24 5h8v30h-8Z');$('center-play').setAttribute('aria-label','Pause video');wake();});
 video.addEventListener('pause',()=>{playbackAccess.setActive(false);$('play-icon').setAttribute('d','M10 5 34 20 10 35Z');$('center-play').setAttribute('aria-label','Play video');player.classList.remove('idle');busy(false);wake();});
-video.addEventListener('playing',()=>{notice('');busy(false);wake();});
+video.addEventListener('playing',()=>{if(!mediaHealth.failed)notice('');busy(false);wake();});
 video.addEventListener('waiting',()=>{if(!video.paused)busy(true);});
-video.addEventListener('error',()=>{busy(false);notice('Video unavailable. The server may be busy, or this file may use an unsupported codec. Try again shortly.',true);});
 function progress(){
   const valid=Number.isFinite(video.duration)&&video.duration>0,fraction=valid?video.currentTime/video.duration:0;
   $('seek').disabled=!valid;$('seek').value=String(Math.round(fraction*1000));$('seek').style.setProperty('--progress',`${fraction*100}%`);

@@ -211,3 +211,11 @@ Chromium's experimental `AudioVideoTracks` flag is enabled **only in the support
 ### Default site-URL playback regression
 
 Run `npm run test:site` with the same browser/FFmpeg setup as `test:media`. It plays a real generated MP4 through the full player in a **plain iframe**, with no website script, keys, token endpoint or cookies. It verifies zero metadata/media requests before Play, successful playback afterward, direct-opening denial and wrong-site CSP blocking. The virtual HTTPS transport tests the application, not a deployed Koyeb service or live Telegram file.
+
+### Unsupported files and playback errors
+
+The player distinguishes decode failures from interrupted transfers and, after a failed same-origin stream, makes at most one four-second HEAD diagnostic request per source load. This requests headers only, never a second video download. It does not probe external providers or run before Play. Server-busy/denied/missing-file responses get specific messages instead of the browser's generic “no supported source” message.
+
+If playback time advances without video dimensions for three seconds, playback pauses with a no-picture explanation. Where frame callbacks are supported, a visible player with dimensions but no delivered/decoded frames receives an eight-second grace period. Seeking, buffering and background tabs do not count toward these thresholds. This cannot detect visually black frames that were successfully decoded (for example, a black intro).
+
+Retry reloads the source. A separate alternate-quality button appears only when the existing metadata lists another source; no sibling Telegram posts are guessed or scanned. Unsupported codecs, audio-only files and corrupt files are not repaired or transcoded. Use a compatible version (commonly H.264/AAC MP4) or an external compatible player. Renaming MKV to MP4 is not conversion. Diagnosing a particular file/device still requires its post link and playback details.

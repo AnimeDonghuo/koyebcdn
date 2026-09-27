@@ -29,7 +29,7 @@ export function createApp(env=process.env, dependencies={}) {
   const store=dependencies.store??createStore(env);
   const get=id=>store.get(id),put=v=>store.put(v);
   const equal=(a,b)=>!!a&&!!b&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-  const assets=new Map(['index.html','player.js','playback-access.js','subtitle-controller.js','audio-controller.js','subtitle-utils.js','subtitle-worker.js','style.css','embed.js','fonts/roboto-latin-400-normal.woff2','fonts/roboto-latin-700-normal.woff2','fonts/roboto-latin-400-italic.woff2'].map(f=>[f,readFileSync(`${root}/public/${f}`)]));
+  const assets=new Map(['index.html','player.js','playback-access.js','subtitle-controller.js','audio-controller.js','media-health.js','subtitle-utils.js','subtitle-worker.js','style.css','embed.js','fonts/roboto-latin-400-normal.woff2','fonts/roboto-latin-700-normal.woff2','fonts/roboto-latin-400-italic.woff2'].map(f=>[f,readFileSync(`${root}/public/${f}`)]));
   // Version the entire small static module graph together. A redeploy must not
   // combine a cached old controller/worker with a newer player entry point.
   const digest=createHash('sha256');for(const [name,content] of assets)digest.update(name).update(content);
