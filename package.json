@@ -1,0 +1,22 @@
+{
+  "name": "koyeb-watch-cdn",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "test:browser": "node browser-tests/player.mjs"
+  },
+  "dependencies": {
+    "big-integer": "^1.6.52",
+    "mongodb": "^7.6.0",
+    "teleproto": "^1.229.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}
