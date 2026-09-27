@@ -1,6 +1,8 @@
 # Telegram watch player · Koyeb + MongoDB
 
-Player-only iframe based on the supplied mobile/landscape screenshots: title/avatar at top left, settings at top right, large center play/pause and next/skip control, white timeline with elapsed/total times, video list, mute, subtitles, and fullscreen. No ads, surrounding site navigation, or server-selection cards are included. This is an independent implementation, not Dailymotion's proprietary player or CDN.
+Player-only iframe based on the supplied mobile/landscape screenshots: title/avatar at top left, settings at top right, large center play/pause and next/skip control, white timeline with elapsed/total times, video list, mute, subtitles, audio-language selection where supported, and fullscreen. No ads, surrounding site navigation, or server-selection cards are included. This is an independent implementation, not Dailymotion's proprietary player or CDN.
+
+> **Protected playback is now required.** Only `https://youngest-corabella-platinum0-23c07cdf.koyeb.app` may embed the player by default. A plain iframe or copied media URL no longer grants playback. Configure both secrets **and integrate your website's backend** before deploying this update. See [SECURITY_SETUP.md](SECURITY_SETUP.md).
 
 ## Deploy and configure
 
@@ -10,18 +12,36 @@ Deploy the Dockerfile on Koyeb, one instance, HTTP port **8000**, health check *
 TELEGRAM_API_ID=your_numeric_api_id
 TELEGRAM_API_HASH=your_api_hash
 TELEGRAM_BOT_TOKEN=your_botfather_token
-TELEGRAM_CHANNEL_ID=-1002617067511
+TELEGRAM_CHANNEL_IDS=-1002617067511
 MONGODB_URI=mongodb+srv://DB_USER:DB_PASSWORD@YOUR_CLUSTER/?retryWrites=true&w=majority
 MONGODB_DATABASE=watch_player
 PORT=8000
 MAX_STREAMS=2
+ALLOWED_SITE_ORIGIN=https://youngest-corabella-platinum0-23c07cdf.koyeb.app
+PLAYBACK_SIGNING_SECRET=generate_one_random_secret
+PLAYBACK_ISSUER_KEY=generate_a_different_random_secret
+PLAYBACK_SESSION_TTL_SECONDS=600
 ```
 
 `.env.example` includes all required/optional settings. Add the bot as an administrator to your DB channel. Obtain application credentials from `my.telegram.org`. **API ID + hash alone are not authorization**: the bot token is required, but no personal phone login/OTP/session string is used by the service. Credentials stay on the server; never put them in your site HTML or URLs.
 
 For MongoDB, create a database user scoped to this database, configure network access for the service, and use its connection URI. Do not commit `.env`. Connections are lazy, use at most three pooled connections, and have bounded connection/operation timeouts. `/healthz` is liveness-only: it intentionally does not connect to MongoDB/Telegram until needed.
 
-## The one-link workflow
+## Multiple Telegram DB channels
+
+Set a comma-separated list in **the player service's Koyeb environment**:
+
+```dotenv
+TELEGRAM_CHANNEL_IDS=-1002617067511,-1001234567890,-1009876543210
+```
+
+Replace the example IDs with your real channel IDs and add the **same configured bot** as an administrator to every channel. For `https://t.me/c/2617067511/22047`, the full ID is `-1002617067511`. Update the list and restart/redeploy to add or remove channels. Whitespace/duplicates are accepted; URLs, wildcards and malformed IDs are rejected. There is no application-imposed channel-count limit, but Koyeb environment-size and Telegram membership/storage limits still apply.
+
+A non-empty `TELEGRAM_CHANNEL_IDS` **replaces** the legacy `TELEGRAM_CHANNEL_ID`; the old variable is used only if the list is absent/blank. Clear both variables if no channels should be allowed. Direct post links, grants, webhook imports, metadata and media routes enforce the same list. Removing a channel also blocks new requests for its old MongoDB catalog sources; existing in-flight responses may finish. Legacy catalog sources missing channel references must be reimported before playback.
+
+Post IDs, metadata cache keys and playback grants include the channel ID, so post `7` in one DB cannot collide with post `7` in another. Explicit `watch:episode-id` captions are still **global catalog IDs**: reuse them only when intentionally grouping the same episode's qualities across channels. One MongoDB catalog and one bot are used; this is not MongoDB sharding or separate per-channel bots. `MAX_STREAMS` remains a global safety limit across all channels, not a separate allowance for each DB.
+
+## Telegram link workflow (inside your authorized site)
 
 Use this URL for your example post:
 
@@ -29,17 +49,15 @@ Use this URL for your example post:
 https://YOUR-KOYEB-URL/https://t.me/c/2617067511/22047
 ```
 
-It displays the player immediately; **nothing is fetched from the catalog or Telegram until the user presses Play**. On Play, the service resolves that post, stores/caches its metadata in MongoDB, and streams its video. You do not need captions, webhooks, episode IDs or prior imports. Existing posts work when Telegram allows your bot to retrieve them.
+The URL identifies the video; it is not an access credential. Use the protected `embed.js` integration below rather than opening this URL directly. It displays the player immediately; **nothing is fetched from the catalog or Telegram until the user presses Play**. On Play, the service resolves that post, stores/caches its metadata in MongoDB, and streams its video. You do not need captions, webhooks, episode IDs or prior imports. Existing posts work when Telegram allows your bot to retrieve them.
 
 ```html
-<iframe
-  src="https://YOUR-KOYEB-URL/https://t.me/c/2617067511/22047"
-  title="Video player"
-  style="display:block;width:100%;aspect-ratio:16/9;border:0"
-  allow="fullscreen; picture-in-picture"
-  allowfullscreen>
-</iframe>
+<script defer src="https://YOUR-KOYEB-URL/embed.js"
+  data-token-endpoint="/api/playback-token"></script>
+<div data-telegram-url="https://t.me/c/2617067511/22047"></div>
 ```
+
+`/api/playback-token` must be implemented on your **authorized website's backend**, not as static frontend JavaScript. The helper in `examples/site-playback-backend.js` requires your real session/per-video authorization callback. It is not automatically installed on your other Koyeb service.
 
 For proxies that normalize double slashes in a path, use:
 
@@ -47,16 +65,16 @@ For proxies that normalize double slashes in a path, use:
 https://YOUR-KOYEB-URL/watch?url=https%3A%2F%2Ft.me%2Fc%2F2617067511%2F22047
 ```
 
-These return HTML, so use an iframe/embed field, **not** `<video src>`. If your site already has a video player, the raw media URL is `/telegram/media/2617067511/22047`. The metadata API is `GET /api/telegram?url=<encoded-post-link>`.
+These return HTML, not `<video src>` data. The protected embed script creates the iframe and handles the authorization handshake. Raw media `/telegram/media/2617067511/22047` and metadata `GET /api/telegram?url=<encoded-post-link>` both require the signed playback-session cookie. They are not standalone public URLs anymore.
 
-Only canonical `https://t.me/c/CHANNEL/POST` links belonging to `TELEGRAM_CHANNEL_ID` are accepted. The linked post plays its exact file: choose the low-quality upload to start with low quality. A lone link cannot identify unrelated uploads as alternate resolutions. Public channel usernames, topic/album links, and arbitrary remote URLs are not supported.
+Only canonical `https://t.me/c/CHANNEL/POST` links belonging to the `TELEGRAM_CHANNEL_IDS` allowlist are accepted. The linked post plays its exact file: choose the low-quality upload to start with low quality. A lone link cannot identify unrelated uploads as alternate resolutions. Public channel usernames, topic/album links, and arbitrary remote URLs are not supported.
 
 ## Embed all your site's video placeholders
 
-Add the script once; existing and dynamically inserted placeholders become players:
+After installing the website backend integration, add the script once; existing and dynamically inserted placeholders become players:
 
 ```html
-<script defer src="https://YOUR-KOYEB-URL/embed.js"></script>
+<script defer src="https://YOUR-KOYEB-URL/embed.js" data-token-endpoint="/api/playback-token"></script>
 <div
   data-telegram-url="https://t.me/c/2617067511/22047"
   data-title="Episode 160 · English + Indonesian"
@@ -70,11 +88,11 @@ Add the script once; existing and dynamically inserted placeholders become playe
 
 `next` / `data-next` is an optional next Telegram post URL. It enables Next and adds the next item to the video list. Without it, the next-shaped center button skips forward **10 seconds** and is labelled accordingly. The video-list button shows the current video and the optional next item; it is not a channel-history scan or recommendation service.
 
-**Autoplay is disabled**, including legacy `autoplay=1` parameters. The middle Play button starts loading. If a browser rejects sound playback after asynchronous loading, it prompts for another tap instead of silently failing. Quality, speed, volume, subtitles, seeking and PiP are available; PiP requires browser support and active playback.
+**Autoplay is disabled**, including legacy `autoplay=1` parameters. The middle Play button starts loading. If a browser rejects sound playback after asynchronous loading, it prompts for another tap instead of silently failing. Double-click/double-tap the video on the left to seek −10 seconds, or on the right to seek +10 seconds. Seeking clamps at the start/end; double-click no longer enters fullscreen. Quality, speed, volume, subtitles, seeking and PiP are available; PiP requires browser support and active playback.
 
 ## Landscape fullscreen
 
-Fullscreen requests landscape orientation lock when supported. When orientation lock is denied and the fullscreen viewport is portrait, a CSS fallback rotates the **entire player, including its controls**. Leaving fullscreen clears the rotation. The settings menu also includes Landscape fullscreen. Some browsers (notably iOS native fullscreen) use their own controls and cannot be forced into a custom orientation; rotate the device in that case. Your iframe must grant fullscreen permission.
+Control/icon sizing is held to the initial embed scale (and can shrink for a narrower viewport), rather than enlarging when the video rotates or enters fullscreen. Fullscreen requests landscape orientation lock when supported. When orientation lock is denied and the fullscreen viewport is portrait, a CSS fallback rotates the **entire player, including its controls**. Leaving fullscreen clears the rotation. The settings menu also includes Landscape fullscreen. Some browsers (notably iOS native fullscreen) use their own controls and cannot be forced into a custom orientation; rotate the device in that case. Your iframe must grant fullscreen permission.
 
 ## MongoDB storage versus active streams
 
@@ -107,7 +125,27 @@ Use a catalog manifest for multiple resolutions/external subtitle tracks. The lo
 
 Watch at `/watch/episode-01`, fetch JSON at `/api/videos/episode-01`, or use `<div data-watch-id="episode-01"></div>` with `embed.js`. API paths are relative to the Koyeb origin. Full-manifest imports replace the existing video. Use HTTPS URLs, unique numeric heights and IDs consisting of letters/digits/hyphens/underscores (max 100). Provider-signed URLs are not automatically renewed.
 
-**Embedded softsubs in MKV/MP4 are not automatically extracted.** Convert/extract ASS/SRT to external WebVTT outside Koyeb. The browser generally cannot enumerate these embedded tracks. The player lists provided external tracks; no tracks means “Not available”. Enable CORS on video and subtitle storage for the player origin; serve WebVTT as `text/vtt`. Recommend fast-start H.264/AAC MP4 with HTTP byte-range support. No HLS/DASH transcoding, quality generation, DRM, or Sora Box/TeraBox resolver is included.
+**Embedded subtitle detection:** the player listens to the browser's native `video.textTracks` list and adds supported embedded caption/subtitle tracks to the selector as “Embedded / browser”, alongside external tracks and the viewer's own file. Tracks can be switched on/off without extra server processing or a separate video download. This works **only when the browser exposes that container/codec's subtitle tracks**; it is not an MKV/MP4 demuxer and cannot detect every embedded ASS/SRT/PGS track. If none are exposed, the player says so rather than claiming the file has no subtitles. For unsupported files, extract/convert subtitles once outside Koyeb into WebVTT and attach external tracks. No FFmpeg, repeated whole-video scans, WASM transcoding, or extra Telegram range downloads are added. Enable CORS on external **subtitle storage** for the player origin; serve WebVTT as `text/vtt`. Subtitles are fetched separately and converted into local text tracks, so adding subtitles no longer forces a cross-origin CORS request on the video itself. Recommend fast-start H.264/AAC MP4 with HTTP byte-range support. No HLS/DASH transcoding, quality generation, DRM, or Sora Box/TeraBox resolver is included.
+
+### Subtitle selection and errors
+
+Track selections use stable identities instead of changing list indices. Temporary browser track resets no longer turn the selection into Off; local/external selections and supported embedded-language preferences are restored after quality/source changes. The selector always includes **Other… Add subtitle file**, even when no embedded track is exposed.
+
+External VTT/SRT/ASS/SSA files are fetched **only when selected**, parsed in the browser worker, and displayed as native text cues. Recognized file extensions identify the format; extensionless endpoints are inspected as small subtitle text responses. Requests have size/time limits. A failed HTTP/CORS/format load shows its error and a **Retry selected subtitles** button rather than silently selecting a non-working track. Choosing Off/another language cancels an in-progress load. Only two parsed external subtitle files are cached, plus one viewer-supplied file; old cue sets are released. All subtitle conversion remains client-side, not on Koyeb.
+
+### Audio language (English, Hindi, etc.)
+
+Settings → **Audio language** lists the embedded audio tracks supplied by the browser's `HTMLMediaElement.audioTracks` API, using their language tags/labels. Selection enables just the chosen track without changing the video URL, seeking or transcoding. A matching language preference is restored when switching to another quality. If that language is missing, the player reports the fallback rather than pretending it selected it.
+
+**This is browser/container dependent.** Many default Chromium/Chrome builds (including many Android browsers) do not expose this API for an MP4/MKV file, even if the file contains multiple audio streams. In that case the selector shows Default audio, is disabled and explains why. Exposed-but-read-only track switching is likewise reported as unsupported. It cannot invent an English/Hindi list or force the browser to decode an unsupported codec. Use a compatible browser/container, or prepare separate language versions externally. Universal switching would require a prepared adaptive-streaming format and a compatible demuxing/player pipeline; that is not added here.
+
+No FFmpeg, multi-GB scans, server-side audio extraction or additional media stream are added to the Koyeb service. Your particular Telegram file/device still needs testing.
+
+### Viewer-supplied subtitle files (no uploads)
+
+Open Settings → **Other… Add your subtitle file**. Choose UTF-8 or BOM-marked UTF-16 `.srt`, `.vtt`, `.ass`, or `.ssa`; the file is parsed in a browser Web Worker and activated as a local text track. Nothing is uploaded to Telegram, MongoDB, or Koyeb. The limit is **2 MB / 10,000 cues**, with a parsing timeout to protect the viewer's device. The worker script is fetched only when needed; video still does not load until Play.
+
+The local track survives quality switching, can be selected alongside external/browser-exposed tracks, and has a Remove option. Selecting another file replaces the prior local track to avoid accumulating memory. Local files are session-only (refresh clears them). ASS/SSA and VTT/SRT formatting is reduced to plain text; karaoke, fonts, positioning, drawings, bitmap subtitles and advanced styling are not supported. Users must choose subtitles timed to their video.
 
 ### Optional Telegram webhook catalog importer
 
@@ -126,7 +164,9 @@ A JSON manifest can also be posted as a plain channel text post. Invalid manifes
 
 ## Security and tests
 
-The configured channel's linked videos become **public through this API**. IDs are not access control. CORS is not hotlink protection. Only publish media you have permission to distribute. Configure edge rate limiting for a public deployment. `ALLOWED_ORIGINS` optionally allows cross-origin JSON reads for exact site origins; iframe embedding itself does not require it. Viewer authentication/DRM is not implemented.
+Playback metadata and Koyeb media routes now require expiring signed sessions; the player uses exact-origin `frame-ancestors` and `postMessage` checks. The website must authenticate/authorize viewers before requesting grants. No bypass is provided when secrets or the integration are missing. Catalog admin imports and Telegram webhook authentication remain separate. Only publish media you can distribute, and add rate limiting to the website's grant route.
+
+This is anti-hotlink protection, not DRM. Authorized viewers can still record/download, and copied bearer grants/cookies can be replayed outside a browser until expiry. A public guest-enabled website necessarily allows visitors to obtain access through that site. Direct external MP4/subtitle URLs retain their provider's access policy; protect those at the provider too. The service root is now a public JSON status response for deployment previews, not a player. See [SECURITY_SETUP.md](SECURITY_SETUP.md) for compatibility and security limits.
 
 ```sh
 npm ci
@@ -136,7 +176,7 @@ node --env-file=.env server.js
 npm test
 ```
 
-Tests cover validation, authentication, private-reference redaction, channel restrictions, byte ranges including >2 GB offsets, chunk slicing, cancellation, mocked Telegram GET/HEAD/416 responses, direct-link routes and concurrency limits. Unit tests inject an in-memory store; real MongoDB/Telegram integration requires your configured services. Browser checks use mocked media/API responses, not a real Telegram episode. Koyeb free-plan availability, database quotas, network limits and sleep behaviour depend on your providers.
+Tests cover validation, authentication, private-reference redaction, channel restrictions, byte ranges including >2 GB offsets, chunk slicing, cancellation, mocked Telegram GET/HEAD/416 responses, direct-link routes and concurrency limits. Unit tests inject an in-memory store; real MongoDB/Telegram integration requires your configured services. Browser checks use mocked media/metadata but exercise real grant/session endpoints and signature verification through a virtual HTTPS origin, not a real Telegram episode. Koyeb free-plan availability, database quotas, network limits and sleep behaviour depend on your providers.
 
 ### Browser regression checks
 
@@ -147,6 +187,24 @@ npm run test:browser
 BROWSER_EXECUTABLE_PATH=/path/to/chromium npm run test:browser
 ```
 
-The browser suite checks **zero video/API requests before Play**, lowest-quality selection, play/pause, quality switching, mute, speed, seeking, menus and a simulated denied-orientation-lock fallback. Actual mobile OS fullscreen behavior and real streaming still need device/service testing. Screenshots can optionally be written to an existing directory using `SCREENSHOT_DIR`; do not commit test artifacts.
+The browser suite checks signed-grant/session setup, renewal without media reload, direct-link denial, wrong-site iframe blocking, and **zero video/API requests before Play**, lowest-quality selection, play/pause, quality switching, mute, speed, seeking, double-click/double-tap gestures, local subtitle files, simulated browser-exposed tracks, and stable icon sizes across a simulated denied-orientation-lock fallback. Actual mobile OS fullscreen behavior and real streaming still need device/service testing. Screenshots can optionally be written to an existing directory using `SCREENSHOT_DIR`; do not commit test artifacts.
 
 A real MongoDB integration test is opt-in: set `TEST_MONGODB_URI` before `npm test`. It uses and drops a new randomly named `watch_test_...` database (never the configured production database). Without that variable, the integration test is skipped and MongoDB adapter tests use a mock client. Font files in `public/fonts` are self-hosted Roboto, with their included license.
+
+The browser test transport intercepts HTTPS responses and cannot fully model CHIPS partition keys or provider-specific cookie policies. Unit tests verify the `Partitioned`, `Secure`, `HttpOnly`, and `SameSite=None` attributes; verify cookie compatibility on real target browsers before production. A mocked site-session test covers the website helper, but your site's actual session integration remains required.
+
+For the agent working on your separate website repository, use the self-contained integration prompt in [WEBSITE_AGENT_PROMPT.md](WEBSITE_AGENT_PROMPT.md). The instructions include backend discovery, protected embedding, multiple-channel links and secret handling.
+
+### Real-media regression tests (development only)
+
+With FFmpeg available locally, run:
+
+```sh
+npm run test:media
+# Or specify existing binaries:
+FFMPEG_BIN=/path/to/ffmpeg BROWSER_EXECUTABLE_PATH=/path/to/chromium npm run test:media
+```
+
+This generates an 8-second H.264/AAC MP4 with two language-tagged audio streams (440 Hz English / 880 Hz Hindi) under ignored `.cache/media-fixtures`. It uses actual browser media playback—not mocked HTMLMediaElement methods—to verify subtitle active cues, English/Hindi selection, source reload persistence, Off, HTTP failure/retry, cancellation, UTF-16 local subtitles, and audio switching. The test measures decoded audio frequency to confirm the audio really changed, not just the dropdown.
+
+Chromium's experimental `AudioVideoTracks` flag is enabled **only in the supported-API test**. A separate ordinary Chromium run verifies the unsupported/default-audio message. The production player cannot enable browser experimental flags and does not claim universal multi-audio support. FFmpeg and generated media are test tools only; they are neither installed nor executed in the production Docker image. The main protected-player browser suite still tests authorization and controls separately. Static module/worker URLs are versioned together at startup to prevent mixing cached old scripts after deployment.

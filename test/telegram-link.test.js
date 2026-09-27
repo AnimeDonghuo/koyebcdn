@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parseTelegramLink,isTelegramPlayerPath,linkFromPath} from '../telegram-link.js';
 import {createApp as createServer} from '../server.js';
 import {createMemoryStore} from '../store.js';
-const createApp=(env,deps={})=>createServer(env,{store:createMemoryStore(),...deps});
+const createApp=(env,deps={})=>createServer(env,{store:createMemoryStore(),playback:{allowedSite:'https://site.example',authorize(){}},...deps});
 const url='https://t.me/c/2617067511/22047',channel='-1002617067511';
 test('parses the supplied post link and validates channel, protocol, host and post number',()=>{
   assert.deepEqual(parseTelegramLink(url,channel),{channelId:channel,messageId:22047});

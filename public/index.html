@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Video player</title><link rel="stylesheet" href="/style.css"><script src="/player.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Video player</title><link rel="stylesheet" href="/style.css"><script src="/player.js" type="module"></script></head>
 <body><main id="player" class="player" tabindex="0" aria-label="Video player"><div id="stage" class="stage">
 <video id="video" playsinline preload="none"></video>
 <header class="top overlay">
@@ -10,12 +10,20 @@
 <button id="center-play" class="center-button" aria-label="Play video" title="Play / Pause"><svg viewBox="0 0 40 40"><path id="play-icon" d="M10 5 34 20 10 35Z"/></svg></button>
 <button id="next" class="next-button" aria-label="Skip forward 10 seconds" title="Skip forward 10 seconds"><svg viewBox="0 0 40 40"><path d="M7 6 31 20 7 34Z"/><path d="M33 6v28" class="stroke"/></svg></button>
 </div>
+<div id="seek-feedback" class="seek-feedback" role="status" aria-live="polite" hidden></div>
 <div id="loading" class="loading" role="status" aria-label="Loading video" hidden></div>
 <div id="notice" class="notice" hidden><p id="status" role="status" aria-live="polite"></p><button id="retry" hidden>Try again</button></div>
 <section id="settings-panel" class="panel settings-panel" aria-label="Playback settings" hidden>
 <div class="panel-heading">Settings<button class="close-panel" aria-label="Close settings">×</button></div>
 <label>Quality<select id="quality" disabled><option>Available on play</option></select></label>
-<label>Subtitles<select id="subtitles" disabled><option value="-1">Off</option></select></label>
+<label>Subtitles<select id="subtitles"><option value="-1">Off</option></select></label>
+<button id="retry-subtitles" hidden>Retry selected subtitles <span>↻</span></button>
+<button id="add-subtitles">Other… Add your subtitle file <span>＋</span></button>
+<input id="subtitle-file" type="file" accept=".srt,.vtt,.ass,.ssa" hidden>
+<button id="remove-subtitles" hidden>Remove your subtitle file <span>×</span></button>
+<p id="subtitle-status" class="subtitle-status" role="status">Embedded tracks appear when the browser supports them. Add SRT, VTT, ASS or SSA from your device (max 2 MB).</p>
+<label>Audio language<select id="audio-language" disabled><option>Available after Play</option></select></label>
+<p id="audio-status" class="subtitle-status" role="status">Audio languages are discovered when the video loads.</p>
 <label>Playback speed<select id="speed"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>Normal</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>
 <label>Volume<input id="volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume"></label>
 <button id="rotate">Landscape fullscreen <span>↻</span></button>

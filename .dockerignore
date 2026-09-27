@@ -5,3 +5,5 @@ node_modules
 test
 
 browser-tests
+
+.cache

@@ -1,23 +1,45 @@
 import http from 'node:http';
+import {createPlaybackAuth,telegramResource,catalogResource} from './playback-auth.js';
 import {createMTProto} from './mtproto.js';
-import {parseTelegramLink,isTelegramPlayerPath} from './telegram-link.js';
+import {parseTelegramLink,isTelegramPlayerPath,configuredTelegramChannels} from './telegram-link.js';
 import {createStore} from './store.js';
 import {readFileSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {timingSafeEqual} from 'node:crypto';
+import {timingSafeEqual,createHash} from 'node:crypto';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {validateVideo,telegramVideo,publicVideo,MAX_TELEGRAM_BYTES} from './catalog.js';
 const root=dirname(fileURLToPath(import.meta.url));
 export function createApp(env=process.env, dependencies={}) {
+  const channels=configuredTelegramChannels(env);
+  const playback=dependencies.playback??createPlaybackAuth(env);
   const mtproto=dependencies.mtproto??createMTProto(env);
-  const expose=v=>({...publicVideo(v,mtproto.enabled),watchUrl:`/watch/${v.id}`,embedUrl:`/watch/${v.id}`});
+  const expose=v=>{
+    const result=publicVideo(v,mtproto.enabled);
+    result.sources=result.sources.map(source=>{
+      const stored=v.sources.find(s=>s.height===source.height);
+      return stored?.fileId&&!channels.has(String(stored.channelId))?{...source,available:false,reason:'This source channel is no longer allowed, or its channel reference is missing.'}:source;
+    });
+    return {...result,watchUrl:`/watch/${v.id}`,embedUrl:`/watch/${v.id}`};
+  };
   const store=dependencies.store??createStore(env);
   const get=id=>store.get(id),put=v=>store.put(v);
-  const origins=(env.ALLOWED_ORIGINS||'').split(',').map(x=>x.trim()).filter(Boolean);
   const equal=(a,b)=>!!a&&!!b&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-  const assets=new Map(['index.html','player.js','style.css','embed.js','fonts/roboto-latin-400-normal.woff2','fonts/roboto-latin-700-normal.woff2','fonts/roboto-latin-400-italic.woff2'].map(f=>[f,readFileSync(`${root}/public/${f}`)]));
+  const assets=new Map(['index.html','player.js','playback-access.js','subtitle-controller.js','audio-controller.js','subtitle-utils.js','subtitle-worker.js','style.css','embed.js','fonts/roboto-latin-400-normal.woff2','fonts/roboto-latin-700-normal.woff2','fonts/roboto-latin-400-italic.woff2'].map(f=>[f,readFileSync(`${root}/public/${f}`)]));
+  // Version the entire small static module graph together. A redeploy must not
+  // combine a cached old controller/worker with a newer player entry point.
+  const digest=createHash('sha256');for(const [name,content] of assets)digest.update(name).update(content);
+  const assetVersion=digest.digest('hex').slice(0,16);
+  for(const [name,content] of assets){
+    if(!/\.(html|js|css)$/.test(name))continue;
+    let text=content.toString();
+    for(const target of assets.keys())for(const prefix of ['/','./'])for(const quote of ['"',"'"]){
+      const before=quote+prefix+target+quote;
+      text=text.split(before).join(quote+prefix+target+'?v='+assetVersion+quote);
+    }
+    assets.set(name,Buffer.from(text));
+  }
   const send=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
   async function body(req) {let text='';for await(const b of req){text+=b;if(Buffer.byteLength(text)>65536) throw Object.assign(new Error('Body exceeds 64 KB'),{status:413});}try{return JSON.parse(text);}catch{throw Object.assign(new Error('Invalid JSON'),{status:400});}}
   let active=0;
@@ -49,10 +71,31 @@ export function createApp(env=process.env, dependencies={}) {
   }
   const server=http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');
-    if(origins.includes(req.headers.origin)){res.setHeader('Access-Control-Allow-Origin',req.headers.origin);res.setHeader('Vary','Origin');}
-    if(req.method==='OPTIONS'){res.writeHead(204,{'Access-Control-Allow-Methods':'GET, HEAD, OPTIONS','Access-Control-Allow-Headers':'Range'});return res.end();}
+    res.setHeader('Content-Security-Policy',`frame-ancestors ${playback.allowedSite}; base-uri 'none'; object-src 'none'`);
+    if(req.method==='OPTIONS'){res.writeHead(204,{'Allow':'GET, HEAD, POST, OPTIONS'});return res.end();}
     try {
       const requestUrl=new URL(req.url,'http://localhost'),path=requestUrl.pathname;
+      if(path==='/'&&!requestUrl.search){
+        // Public service status only, not a player entry point. This remains
+        // embeddable for deployment previews; every actual player is restricted.
+        res.setHeader('Content-Security-Policy',"base-uri 'none'; object-src 'none'");
+        return send(res,200,{service:'Protected Telegram player',allowedSite:playback.allowedSite,message:'Open videos through the authorized site. Plain links do not grant playback access.'});
+      }
+      if(path==='/player-config.js'&&req.method==='GET'){
+        res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-store'});
+        return res.end(`export const allowedSite=${JSON.stringify(playback.allowedSite)};`);
+      }
+      if(path==='/api/playback/grant'&&req.method==='POST')return send(res,200,playback.issue(req,await body(req)));
+      if(path==='/api/playback/session'&&req.method==='POST'){
+        const input=await body(req);
+        if(typeof input.resource!=='string'||input.resource.length>200)return send(res,400,{error:'Invalid playback resource'});
+        return send(res,200,playback.open(req,res,input.resource));
+      }
+      if(path==='/api/playback/session'&&req.method==='GET'){
+        const resource=requestUrl.searchParams.get('resource');
+        if(!resource||resource.length>200)return send(res,400,{error:'Invalid playback resource'});
+        const claims=playback.authorize(req,resource);return send(res,200,{expiresAt:claims.exp*1000});
+      }
       if(path==='/healthz') return send(res,200,{ok:true,activeStreams:active});
       if(path==='/api/videos'&&req.method==='POST') {
         if(!equal(req.headers.authorization,env.ADMIN_TOKEN?`Bearer ${env.ADMIN_TOKEN}`:null)) return send(res,401,{error:'Unauthorized'});
@@ -61,7 +104,7 @@ export function createApp(env=process.env, dependencies={}) {
       if(path==='/telegram/webhook'&&req.method==='POST') {
         if(!equal(req.headers['x-telegram-bot-api-secret-token'],env.TELEGRAM_WEBHOOK_SECRET)) return send(res,401,{error:'Unauthorized'});
         const update=await body(req), message=update.channel_post??update.edited_channel_post;
-        if(!message || !env.TELEGRAM_CHANNEL_ID || String(message.chat?.id)!==env.TELEGRAM_CHANNEL_ID) return send(res,200,{ok:true,ignored:true});
+        if(!message || !channels.has(String(message.chat?.id))) return send(res,200,{ok:true,ignored:true});
         const caption=(message.text??message.caption??'').trim();
         if(caption.startsWith('{')) {
           let video;try {video=validateVideo(JSON.parse(caption));}catch {return send(res,200,{ok:true,ignored:true,reason:'Invalid manifest'});}
@@ -73,23 +116,26 @@ export function createApp(env=process.env, dependencies={}) {
         return send(res,200,{ok:true});
       }
       if(path==='/api/telegram'&&req.method==='GET'){
-        const source=parseTelegramLink(requestUrl.searchParams.get('url'),env.TELEGRAM_CHANNEL_ID);
+        const source=parseTelegramLink(requestUrl.searchParams.get('url'),channels);
+        playback.authorize(req,telegramResource(source));
         requireMTProto();
         const metadata=await describePost(source);
         return send(res,200,{id:`tg-${source.channelId.slice(1)}-${source.messageId}`,title:metadata.title,
           sources:[{height:metadata.height,type:metadata.type,url:`/telegram/media/${source.channelId.slice(4)}/${source.messageId}`,available:true}],subtitles:[]});
       }
       const api=path.match(/^\/api\/videos\/([\w-]+)$/);
-      if(api&&req.method==='GET'){const v=await get(api[1]);return send(res,v?200:404,v?expose(v):{error:'Video not found'});}
+      if(api&&req.method==='GET'){playback.authorize(req,catalogResource(api[1]));const v=await get(api[1]);return send(res,v?200:404,v?expose(v):{error:'Video not found'});}
       const media=path.match(/^\/media\/([\w-]+)\/(\d+)$/);
       const directMedia=path.match(/^\/telegram\/media\/([1-9]\d*)\/([1-9]\d*)$/);
       if((media||directMedia)&&['GET','HEAD'].includes(req.method)) {
         let source;
         if(directMedia){
-          source=parseTelegramLink(`https://t.me/c/${directMedia[1]}/${directMedia[2]}`,env.TELEGRAM_CHANNEL_ID);
+          source=parseTelegramLink(`https://t.me/c/${directMedia[1]}/${directMedia[2]}`,channels);
+          playback.authorize(req,telegramResource(source));
           requireMTProto();
-        }else source=(await get(media[1]))?.sources.find(s=>s.height===Number(media[2])&&s.fileId);
+        }else {playback.authorize(req,catalogResource(media[1]));source=(await get(media[1]))?.sources.find(s=>s.height===Number(media[2])&&s.fileId);}
         if(!source) return send(res,404,{error:'Source not found'});
+        if(!channels.has(String(source.channelId)))return send(res,403,{error:'This source is not in an allowed DB channel. Reimport legacy entries with missing channel references.'});
         const useMTProto=mtproto.enabled && source.channelId && Number.isInteger(source.messageId);
         if(!useMTProto&&(!source.size||source.size>MAX_TELEGRAM_BYTES)) return send(res,422,{error:'Configure MTProto bot authorization and reimport this post, or use a direct media URL.'});
         if(active>=maxStreams){res.setHeader('Retry-After','5');return send(res,503,{error:'Stream capacity reached. Try again shortly.'});}
@@ -112,7 +158,7 @@ export function createApp(env=process.env, dependencies={}) {
       }
       if(['GET','HEAD'].includes(req.method)) {
         const name=(path==='/'||path==='/watch'||path.startsWith('/watch/')||isTelegramPlayerPath(path))?'index.html':path.slice(1);
-        if(assets.has(name)){res.setHeader('Content-Type',name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.woff2')?'font/woff2':'text/css; charset=utf-8');res.setHeader('Cache-Control','public, max-age=300');return res.end(req.method==='HEAD'?undefined:assets.get(name));}
+        if(assets.has(name)){res.setHeader('Content-Type',name.endsWith('.html')?'text/html; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':name.endsWith('.woff2')?'font/woff2':'text/css; charset=utf-8');res.setHeader('Cache-Control',name==='index.html'?'no-store':requestUrl.searchParams.get('v')===assetVersion?'public, max-age=300':'no-cache');return res.end(req.method==='HEAD'?undefined:assets.get(name));}
       }
       send(res,404,{error:'Not found'});
     }catch(e){if(!res.headersSent&&!res.destroyed){if(e.status===503)res.setHeader('Retry-After','5');res.removeHeader('Content-Length');if(e.status!==416)res.removeHeader('Content-Range');send(res,e.status||502,{error:e.status?e.message:'Request could not be completed'});}else res.destroy();}
