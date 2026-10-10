@@ -6,7 +6,7 @@ Player-only iframe based on the supplied mobile/landscape screenshots: title/ava
 
 ## Deploy and configure
 
-**No Docker on Botkeep?** Use its Node.js 22 + GitHub source and `npm start`; see [Botkeep deployment steps](BOTKEEP_DEPLOY.md). Botkeep supplies `SERVER_PORT`, which the app now prefers over Koyeb’s `PORT`. You still need external MongoDB.
+**No Docker on Botkeep?** Use its Node.js 22 + GitHub source and `npm start`; see [Botkeep deployment steps](BOTKEEP_DEPLOY.md). Botkeep supplies `SERVER_PORT` and writes saved Environment values to a runtime `.env` file, both supported by `npm start`. Restart after changes. Koyeb’s `PORT` and process-provided secrets still work. You still need external MongoDB.
 
 
 Deploy the Dockerfile on Koyeb, one instance, HTTP port **8000**, health check **GET /healthz**. Add these environment variables privately in Koyeb:
