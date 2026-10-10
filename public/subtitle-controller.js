@@ -67,7 +67,7 @@ export function setupSubtitles(video,{select,fileInput,fileButton,removeButton,r
     if(entry?.cues){status.textContent=`${entry.label}: ${entry.cues.length} cues loaded.`;return;}
     const native=nativeEntries();
     if(selected.startsWith('native-')){status.textContent=native.some(e=>e.key===selected)?'Embedded subtitle track selected.':'This quality does not expose your selected subtitle track. Choose another track or add a file.';return;}
-    status.textContent=!metadataSeen?'Press Play to discover embedded subtitles, or add a subtitle file now.':!native.length&&!external.size?'No embedded subtitle tracks are exposed by this browser. Add your own file; MKV/ASS/PGS may require extraction outside Koyeb.':'Subtitles are off. Choose a language or add your own file.';
+    status.textContent=!metadataSeen?'Press Play to discover embedded subtitles, or add a subtitle file now.':!native.length&&!external.size?'No embedded subtitle tracks are exposed by this browser. Add your own file; MKV/ASS/PGS may require extraction first.':'Subtitles are off. Choose a language or add your own file.';
   }
   function cancel(){task?.controller.abort();task=null;}
   function parse(buffer,name,signal){

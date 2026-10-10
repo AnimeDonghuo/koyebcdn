@@ -1,0 +1,20 @@
+# Deploy on Botkeep.cloud without Docker
+
+Botkeep supports a **Node.js** GitHub source, so this repository runs without the Dockerfile. This deploys the **player/API**, not the website that embeds it. Your website stays at `https://youngest-corabella-platinum0-23c07cdf.koyeb.app` unless you deliberately move that website separately.
+
+1. In Create server, select **Node.js** (not Node.js + Nodemon), runtime **22**, name your server and allocate resources. Choose **GitHub** for Source (not Blank workspace), connect/select `AnimeDonghuo/koyebcdn`, branch `arena/01a0e3db-koyebcdn`, root `/`, and start command **`npm start`**. Commit `package-lock.json` is already present. If GitHub selection is unavailable, use a ZIP of the project root (not just `public/`): include `package.json`, `package-lock.json`, `*.js`, and `public/`, but exclude `.git`, `node_modules`, `.env`, caches, and video files. Ensure dependencies are installed (`npm ci --omit=dev`) before starting if Botkeep doesn't install them automatically. Do not choose a static-site profile.
+2. Set environment/secrets in Botkeep's **Environment** settings, not in GitHub or ZIP:
+   - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_BOT_TOKEN` (the same bot must administer every allowed channel)
+   - `TELEGRAM_CHANNEL_IDS` (full IDs, e.g. `-1002617067511`)
+   - `MONGODB_URI` for an **external MongoDB** (Botkeep currently does not offer MongoDB), `MONGODB_DATABASE=watch_player`
+   - `ALLOWED_SITE_ORIGIN=https://youngest-corabella-platinum0-23c07cdf.koyeb.app`, `PLAYBACK_AUTH_MODE=site`, `MAX_STREAMS=1` (start conservatively on shared free resources).
+   - **Do not set `PORT=8000`** if Botkeep supplies `SERVER_PORT`: the app checks `SERVER_PORT` first. Check the assigned port in **Network**. For Koyeb, `PORT` still works; otherwise the app defaults to 8000. Both use `0.0.0.0`.
+   - If a reverse proxy leaves the internal Host header and does not provide `X-Forwarded-Host`, optionally set `PLAYER_ORIGIN=https://YOUR-ACTUAL-PLAYER-DOMAIN` (no trailing path). Only set this after your HTTPS domain is assigned in **Domains**. This is the *player* origin, not `ALLOWED_SITE_ORIGIN` (the embedding website). It also works with Koyeb but usually isn't needed.
+3. Enable an HTTPS public domain in **Domains** and check that `https://YOUR-ACTUAL-PLAYER-DOMAIN/healthz` returns JSON with `ok:true`. Use that domain as the player URL inside an iframe on the allowed website, for example:
+   ```html
+   <iframe src="https://YOUR-ACTUAL-PLAYER-DOMAIN/https://t.me/c/2617067511/22047" allow="fullscreen" allowfullscreen></iframe>
+   ```
+   The app makes no Telegram/Mongo requests before Play; press Play on the allowed website to test a real post. The `/healthz` endpoint is liveness-only and does **not** verify the credentials, Mongo connectivity, bot membership, media codecs or bandwidth. Direct top-level playback is deliberately refused.
+4. For subsequent releases, use Botkeep's **GitHub** tab to pull/apply the new revision. Its plain **Redeploy** action does *not* pull GitHub updates. Watch **Console** logs, then retest `/healthz` and an authorized embed. Keep `PLAYBACK_AUTH_MODE=site`; signed mode requires separate website integration.
+
+**Limits:** Video bytes are relayed from Telegram by this Node.js process, not uploaded to Botkeep. `MAX_STREAMS` bounds concurrent streams but does not override Botkeep network/fair-use quotas or make unsupported video codecs playable. Keep an external MongoDB reachable from Botkeep's egress (including TLS/network access) and use a scoped database user. This repository does not provide an alternative SQL catalog. Free-plan resources and port/domain availability must be confirmed in *your* panel. We cannot validate live Botkeep networking, Telegram access, or your domain from a local test. Don't paste credentials into chat or commit them.

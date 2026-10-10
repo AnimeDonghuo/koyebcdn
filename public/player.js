@@ -55,7 +55,7 @@ async function load(){
   if(loaded)return;
   if(loadPromise)return loadPromise;
   loadPromise=(async()=>{
-    if(!id&&!postUrl)throw new Error('Add a Telegram post link after this Koyeb URL to load a video.');
+    if(!id&&!postUrl)throw new Error('Add a Telegram post link after this player URL to load a video.');
     const res=await fetch(postUrl?`/api/telegram?url=${encodeURIComponent(postUrl)}`:`/api/videos/${encodeURIComponent(id)}`),item=await res.json();
     if(!res.ok)throw new Error(item.error||'Unable to load video.');
     title(item.title);

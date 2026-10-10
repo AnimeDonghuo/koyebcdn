@@ -4,12 +4,12 @@ import {MongoClient} from 'mongodb';
 export function createStore(env,makeClient=(uri,options)=>new MongoClient(uri,options)) {
   let client, pending;
   async function db() {
-    if(!env.MONGODB_URI)throw Object.assign(new Error('Set MONGODB_URI in Koyeb to enable the video catalog'),{status:503});
+    if(!env.MONGODB_URI)throw Object.assign(new Error('Set MONGODB_URI in the server environment to enable the video catalog'),{status:503});
     if(!pending){
       client=makeClient(env.MONGODB_URI,{maxPoolSize:3,minPoolSize:0,maxIdleTimeMS:60000,serverSelectionTimeoutMS:5000,connectTimeoutMS:5000,socketTimeoutMS:15000,waitQueueTimeoutMS:5000});
       pending=client.connect().then(()=>client.db(env.MONGODB_DATABASE||'watch_player')).catch(async()=>{
         await client.close().catch(()=>{});pending=null;
-        throw Object.assign(new Error('MongoDB is unavailable; check the Koyeb database configuration'),{status:503});
+        throw Object.assign(new Error('MongoDB is unavailable; check MONGODB_URI and the database configuration'),{status:503});
       });
     }
     return pending;

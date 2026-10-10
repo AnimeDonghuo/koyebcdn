@@ -12,6 +12,18 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {validateVideo,telegramVideo,publicVideo,MAX_TELEGRAM_BYTES} from './catalog.js';
 const root=dirname(fileURLToPath(import.meta.url));
+// Some hosts assign a random proxy port as SERVER_PORT (Botkeep), others use
+// PORT (Koyeb). The process must listen on 0.0.0.0 so the platform proxy can reach it.
+export function resolvePort(env=process.env){
+  for(const key of ['SERVER_PORT','PORT']){
+    const value=env[key];
+    if(value===undefined||value===null||value==='')continue;
+    const port=Number(value);
+    if(!Number.isInteger(port)||port<1||port>65535)throw new Error(`${key} must be a TCP port number between 1 and 65535`);
+    return port;
+  }
+  return 8000;
+}
 export function createApp(env=process.env, dependencies={}) {
   const channels=configuredTelegramChannels(env);
   const playbackMode=env.PLAYBACK_AUTH_MODE||'site';
@@ -50,7 +62,7 @@ export function createApp(env=process.env, dependencies={}) {
   const fileCache=new Map();
   const metadataCache=new Map(),lookups=new Map();
   function requireMTProto(){
-    if(!mtproto.enabled)throw Object.assign(new Error('Set TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_BOT_TOKEN in Koyeb for direct Telegram links'),{status:503});
+    if(!mtproto.enabled)throw Object.assign(new Error('Set TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_BOT_TOKEN in the server environment for direct Telegram links'),{status:503});
   }
   async function describePost(source){
     const key=`${source.channelId}/${source.messageId}`,cached=metadataCache.get(key);
@@ -171,4 +183,4 @@ export function createApp(env=process.env, dependencies={}) {
   server.requestTimeout=15000;server.headersTimeout=10000;server.keepAliveTimeout=5000;
   server.on('close',()=>{store.close().catch(()=>{});mtproto.close().catch(()=>{});});return server;
 }
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) createApp().listen(Number(process.env.PORT)||8000,'0.0.0.0',()=>console.log('Watch API listening'));
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){const port=resolvePort();createApp().listen(port,'0.0.0.0',()=>console.log(`Watch API listening on port ${port}`));}

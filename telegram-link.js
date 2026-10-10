@@ -22,7 +22,7 @@ export function parseTelegramLink(value, allowedChannels) {
   const channelId=`-100${match[1]}`,messageId=Number(match[2]);
   if(messageId>2147483647)throw Object.assign(new Error('Invalid Telegram post number'),{status:400});
   const channels=allowedChannels instanceof Set?allowedChannels:parseChannelIds(allowedChannels||'');
-  if(!channels.size)throw Object.assign(new Error('Set TELEGRAM_CHANNEL_IDS to your allowed DB channel IDs in Koyeb'),{status:503});
+  if(!channels.size)throw Object.assign(new Error('Set TELEGRAM_CHANNEL_IDS to your allowed DB channel IDs in the server environment'),{status:503});
   if(!channels.has(channelId))throw Object.assign(new Error('This post is not in an allowed DB channel'),{status:403});
   return {channelId,messageId};
 }
