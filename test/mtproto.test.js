@@ -41,3 +41,21 @@ test('MTProto transport returns precise 206 and HEAD headers, using bot authoriz
   res=await fetch(url,{headers:{Range:'bytes=36-'}});assert.equal(res.status,416);assert.equal(res.headers.get('content-range'),'bytes */36');
   await transport.close();
 });
+test('large/open-ended browser ranges are served in bounded 206 windows',async t=>{
+  const {windowRange,MAX_RANGE_BYTES}=await import('../mtproto.js');
+  assert.deepEqual(windowRange(byteRange('bytes=0-',MAX_RANGE_BYTES*3),MAX_RANGE_BYTES*3),{start:0,end:MAX_RANGE_BYTES-1,partial:true});
+  assert.deepEqual(windowRange(byteRange(`bytes=${MAX_RANGE_BYTES}-`,MAX_RANGE_BYTES*3),MAX_RANGE_BYTES*3),{start:MAX_RANGE_BYTES,end:MAX_RANGE_BYTES*2-1,partial:true});
+  assert.deepEqual(windowRange(byteRange('bytes=17-27',MAX_RANGE_BYTES*3),MAX_RANGE_BYTES*3),{start:17,end:27,partial:true});
+  assert.equal(windowRange(byteRange(undefined,MAX_RANGE_BYTES*3),MAX_RANGE_BYTES*3).end,MAX_RANGE_BYTES*3-1);
+  let downloads=0;
+  const size=MAX_RANGE_BYTES+128;
+  const client={setLogLevel(){},async start(){},async destroy(){},async getMessages(){return [{media:{document:{size,mimeType:'video/mp4'}}}];},async *iterDownload(_message,options){downloads++;assert.equal(options.offset,0);for(let i=0;i<8;i++)yield Buffer.alloc(512*1024,i);}};
+  const transport=createMTProto({TELEGRAM_API_ID:'123',TELEGRAM_API_HASH:'hash',TELEGRAM_BOT_TOKEN:'bot'},()=>client);
+  const server=http.createServer(async(req,res)=>{try{await transport.stream(req,res,{channelId:'-100123',messageId:7},new AbortController().signal);}catch(e){res.statusCode=e.status||500;res.end();}});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{await new Promise(r=>server.close(r));await transport.close();});
+  const url=`http://127.0.0.1:${server.address().port}`;
+  const res=await fetch(url,{headers:{Range:'bytes=0-'}});
+  assert.equal(res.status,206);assert.equal(res.headers.get('content-range'),`bytes 0-${MAX_RANGE_BYTES-1}/${size}`);
+  assert.equal(res.headers.get('content-length'),String(MAX_RANGE_BYTES));
+  assert.equal((await res.arrayBuffer()).byteLength,MAX_RANGE_BYTES);assert.equal(downloads,1);
+});

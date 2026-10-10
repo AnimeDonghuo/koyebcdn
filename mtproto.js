@@ -18,6 +18,14 @@ export function byteRange(header, size) {
   return {start,end:Math.min(size-1,end),partial:true};
 }
 
+// Limit large/open-ended range responses: browsers request the next window as
+// needed. This releases a scarce Telegram transfer slot between windows.
+export const MAX_RANGE_BYTES=4*1024*1024;
+export function windowRange(range,size,maxBytes=MAX_RANGE_BYTES){
+  if(!range.partial)return range; // Never truncate a full 200 response.
+  return {...range,end:Math.min(range.end,range.start+maxBytes-1)};
+}
+
 // At most one download chunk buffered; backpressure from the HTTP socket controls reads.
 export async function* sliceChunks(chunks,skip,length,signal) {
   for await(const chunk of chunks) {
@@ -73,6 +81,7 @@ export function createMTProto(env, makeClient=(...args)=>new TelegramClient(...a
       const size=Number(document.size.toString());
       let range;
       try{range=byteRange(req.headers.range,size);}catch(e){if(e.status===416)res.setHeader('Content-Range',`bytes */${size}`);throw e;}
+      range=windowRange(range,size);
       const length=range.end-range.start+1;
       res.statusCode=range.partial?206:200;
       res.setHeader('Accept-Ranges','bytes');res.setHeader('Content-Length',length);

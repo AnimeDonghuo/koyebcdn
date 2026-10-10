@@ -157,6 +157,8 @@ export function createApp(env=process.env, dependencies={}) {
         if(active>=maxStreams){res.setHeader('Retry-After','5');return send(res,503,{error:'Stream capacity reached. Try again shortly.'});}
         if(!useMTProto&&req.headers.range&&!/^bytes=\d*-\d*$/.test(req.headers.range)) return send(res,416,{error:'Only single byte ranges supported'});
         active++;
+        const startedAt=Date.now(),streamKind=useMTProto?'mtproto':'bot-api';
+        let streamError=null;
         const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),useMTProto?15*60*1000:120000);
         const disconnect=()=>controller.abort();res.on('close',disconnect);
         try {
@@ -169,7 +171,11 @@ export function createApp(env=process.env, dependencies={}) {
           for(const h of ['content-length','content-range','accept-ranges']) if(upstream.headers.has(h))res.setHeader(h,upstream.headers.get(h));
           res.setHeader('Content-Type',source.type);res.setHeader('Cache-Control','private, max-age=0');
           if(req.method==='HEAD'||!upstream.body)res.end();else await pipeline(Readable.fromWeb(upstream.body),res);
-        } finally {clearTimeout(timer);res.off('close',disconnect);active--;}
+        } catch(error){streamError=error;throw error;} finally {
+          const elapsed=Date.now()-startedAt;
+          if(elapsed>5000||streamError||res.statusCode>=400)console.log(`Media ${streamKind} ${req.method} status=${res.statusCode} ms=${elapsed} range=${req.headers.range?'yes':'no'} result=${streamError?(controller.signal.aborted?'cancelled':'failed'):'complete'} active=${active}`);
+          clearTimeout(timer);res.off('close',disconnect);active--;
+        }
         return;
       }
       if(['GET','HEAD'].includes(req.method)) {
